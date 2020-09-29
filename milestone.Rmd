@@ -1,0 +1,302 @@
+---
+title: "Milestone Project"
+author: "Felipe Frazatto"
+date: "9/29/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, 
+                      message = FALSE,
+                      warning=FALSE)
+```
+
+
+# Introduction
+
+Coursera's milestone project. The main objective is to execute an exploratory
+data analysis of the provided data set, composed of a set of news, blogs and 
+twitter texts.
+
+First the data will be processed by tokenrization and stopword cleaning so that
+the uni, bi, tri and n-gram analysis can be efficiently done.
+
+
+# Data Loading
+
+Load all relevant libraries.
+
+
+```{r message=FALSE}
+
+library(ggplot2)
+library(dplyr)
+library(tm)
+library(tidytext)
+library(knitr)
+library(kableExtra)
+library(gridExtra)
+library(ngram)
+
+```
+
+
+Since the data files are too large they are not present in this github project 
+repository, but, as reproducibility is extremely important, the data can be 
+acquired with this 
+[link](https://d396qusza40orc.cloudfront.net/dsscapstone/dataset/Coursera-SwiftKey.zip).
+
+Before loading the data into R, first lets explore each file sizes.
+
+```{r cache=TRUE}
+
+# Files Paths
+blogFile <- "../Data/en_US/en_US.blogs.txt"
+newsFile <- "../Data/en_US/en_US.news.txt"
+twitterFile <- "../Data/en_US/en_US.twitter.txt"
+
+# Count number of lines
+nLines <- c(length(readLines(blogFile, encoding = "UTF-8")),
+            length(readLines(newsFile, encoding = "UTF-8")),
+            length(readLines(twitterFile, encoding = "UTF-8")))
+
+# Count number of words
+nWords <- c(wordcount(readLines(blogFile, encoding = "UTF-8"), sep = " "),
+            wordcount(readLines(newsFile, encoding = "UTF-8"), sep = " "),
+            wordcount(readLines(twitterFile, encoding = "UTF-8"), sep = " "))
+
+# Set file names
+fName <- c("Blog",
+           "News",
+           "Twitter")
+
+# Compute file sizes in megabytes
+fSize <- c(round(file.size(blogFile)/2^20, 2),
+           round(file.size(newsFile)/2^20, 2),
+           round(file.size(twitterFile)/2^20 ,2))
+
+# Make data frame
+fileSummary <- data.frame(file = fName,
+                          size = fSize,
+                          nLines = nLines,
+                          nWords = nWords)
+
+# Plot table
+fileSummary %>%
+  kbl() %>%
+  kable_paper("hover", full_width = F)
+
+# Free RAM
+gc(verbose = FALSE)
+
+```
+
+The files are huge. Unfortunately my computer does not have the computational 
+power to use all the data files (trust me, I tried). What I am going to do to
+be able to at least plot the n-grams is read 20% of each data set, sum them and
+use only 50% of the result. 
+
+This is a major slice in the data set which should never be done when dealing 
+with real world problems, since it may introduce a huge bias in your model. I am
+only doing it because I have a decade old computer with no other alternative and 
+this is not the final product!
+
+
+```{r cache=TRUE}
+
+f1 = 0.2
+f2 = 0.5
+
+# Read the files, note the factor f1 multipling the number of lines to be read
+blogData <- readLines(blogFile,
+                      encoding = "UTF-8",
+                      n = round(nLines[1]*f1))
+
+newsData <- readLines(newsFile, 
+                      encoding = "UTF-8", 
+                      n = round(nLines[2]*f1))
+
+twitterData <- readLines(twitterFile,
+                         encoding = "UTF-8",
+                         n = round(nLines[3]*f1))
+
+# Concatenate results
+totalData <- c(blogData, newsData, twitterData)
+
+# Further slice the data
+totalData <- totalData[1: round(length(totalData)*f2)]
+
+# Make data frame
+finalSummary <- data.frame(total.Size = format(object.size(totalData), 
+                                               units = "MB"),
+                           total.Lines = length(totalData),
+                           total.Words = wordcount(totalData))
+
+# Plot table
+finalSummary %>%
+  kbl() %>%
+  kable_paper("hover", full_width = F)                          
+        
+# Free RAM
+rm(fName, fSize, nLines, nWords)
+rm(blogData, newsData, twitterData)
+gc(verbose = FALSE)
+
+```
+
+
+# Data Processing
+
+As noted before, my computer lacks the computational power to process the whole
+data set, however in a real world problem the data set would have to be 
+eventually cleaned and divided into training and test sets. Here the cleaning 
+and ngrams will be made.
+
+## Cleaning
+
+The cleaning processes will occur in the following order:
+
+1- Convert all text to lowercase;
+2- Substitute punctuation with blank spaces;
+3- Substitute any number with blank spaces;
+4- Reduce multiple spaces to only one;
+
+When dealing with a unigram, stopwords will be removed. However, since the 
+final product is a prediction app, removing stopwords would result in low 
+accuracy. A list of stopwords can be found 
+[here](https://www.ranks.nl/stopwords));
+
+
+```{r cache=TRUE}
+
+# Declare function for cleaning
+cleanText <- function(text) {
+     
+     newText <- text %>% 
+          tolower() %>% 
+          gsub(pattern = "[[:punct:]]", replacement =  " ") %>% 
+          gsub(pattern = "[0-9]", replacement = " ") %>% 
+          gsub(pattern = " +", replacement = " ")      
+     
+     return(newText)
+     
+}
+
+# Clean data
+totalClear <- data.frame(text = cleanText(totalData))
+
+# Free RAM
+rm(totalData)
+gc(verbose = FALSE)
+
+```
+
+## Tokenrization
+
+Tokenrization separates the text word by word and counts the frequency that each
+one appears, like a histogram. Alternatively, instead of counting individual 
+words, a bigram can be made, which counts the appearance of pair of words. This
+can be extended to trigrams (sequence of three words) or a n-gram (sequence of
+n words). 
+
+This approach is extremely useful when making a word prediction app, since it 
+gives the most likely sequence of words that the user usually writes.
+
+First, lets define some useful functions, so the code can be more concise. 
+
+```{r}
+
+# Define function for ngram making
+makeNgrams <- function(dataframe, n){
+        
+        # if it is a unigram, stopwords will be removed
+        if(n == 1){
+                
+                dataframe$text <- removeWords(dataframe[,1], 
+                                              stopwords("english"))
+                
+                dataframe$text <- gsub("\\b[[:alpha:]]{1}\\b",
+                                       dataframe[, 1],
+                                       replacement = " ")
+        }
+        
+        ng <- dataframe %>%
+                unnest_tokens(word, text, token = "ngrams", n = n) %>%
+                table() %>%
+                data.frame()
+
+        ng <- ng[order(ng$Freq, decreasing = TRUE), ]
+                
+        ng
+}
+
+# Define function for ploting the bar graphs
+plotMost <- function(data, top = 10, title = "Ngram"){
+        
+        topWords <- data[1:top, ]
+        names(topWords) <- c("x", "y")
+        
+        g <- ggplot(topWords, mapping = aes(x = reorder(x, -y), y = y, fill = y)) + 
+                geom_bar(stat = "identity", 
+                         color = "black") + 
+                labs(x = "Words", y = "Frequency", title = title) +
+                theme(axis.text.x = element_text(angle = 90)) +
+                scale_fill_distiller(palette="Set3")
+        g
+        
+}
+```
+
+
+Now, lets make the ngrams.
+
+```{r cache=TRUE}
+
+gc(verbose = FALSE)
+
+n1 <- totalClear %>% 
+        makeNgrams(1) %>% 
+        plotMost(top = 15, title = "Unigram")
+
+gc(verbose = FALSE)
+
+n2 <- totalClear %>% 
+        makeNgrams(2) %>%
+        plotMost(top = 15, "Bigram")
+
+gc(verbose = FALSE)
+
+n3 <- totalClear %>% 
+        makeNgrams(3) %>% 
+        plotMost(top = 15, "Trigram")
+
+gc(verbose = FALSE)
+
+```
+```{r cache=TRUE}
+
+grid.arrange(n1, n2, n3, nrow = 2, ncol = 2)
+
+```
+
+# Results
+
+As can be seen with the ngram figures, it is possible to infer the most 
+frequent words and suggest the next most likely word that the user could write, 
+only based on the bi and trigrams.
+The model accuracy is related to the data set used, and in this particular
+application each user would have a particular data set, reflecting each user 
+writing style and mannerisms. This means that the most important part of the 
+algorithm is the constant input of data and model training.
+
+
+One thing noted was that it took a lot of time and memory just to make the 
+ngrams even with an extremely reduced data set, so for the final product it
+would be necessary to use a more efficient method for this step and model 
+training.
+
+An aspect of this kind of approach on predictive text is that the algorithm can
+be trained with any desired language, since it is based on probability and not
+grammar, rendering it very versatile.
+
+
