@@ -1,0 +1,337 @@
+---
+title: "fast_ngrams_v2"
+author: "Felipe Frazatto"
+date: "10/12/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Libraries
+
+```{r}
+
+library(dplyr)
+library(tm)
+library(tidytext)
+library(ngram)
+library(tidyr)
+
+```
+
+# Files
+
+```{r}
+
+blogFile <- "../Data/en_US/en_US.blogs.txt"
+newsFile <- "../Data/en_US/en_US.news.txt"
+twitterFile <- "../Data/en_US/en_US.twitter.txt"
+
+```
+
+# Read Files
+
+```{r}
+
+readFile <- function(file.path){
+  
+  
+  print("Reading File...")
+  start.time <- Sys.time()
+  
+  textData <- readLines(file.path,
+                        encoding = "UTF-8",
+                        skipNul = TRUE)
+  
+  textData <- data.frame(text = textData)
+  
+  end.time <- Sys.time()
+  time.taken <- end.time - start.time
+  print(paste("Task completed! Ellapsted Time: ", 
+              time.taken, sep = " "))
+  
+  return(textData)
+  
+}
+
+```
+
+# Clean Function
+
+```{r}
+
+# Declare function for cleaning
+cleanText <- function(text) {
+  
+  print("Cleaning data...")
+  start.time <- Sys.time()
+  
+  newText <- text %>% 
+    tolower() %>% 
+    
+    gsub(pattern = "[^a-zA-Z\\d\\s:]",
+         replacement = " ") %>%
+    
+    gsub(pattern = "[[:punct:]]", 
+         replacement =  " ") %>% 
+    
+    gsub(pattern = "[0-9]", 
+         replacement = " ") %>% 
+    
+    gsub(pattern = "\\b(?=\\w*(\\w){3}\\1)\\w+\\b",
+         replacement = " ", 
+         perl = TRUE) %>%
+    
+    gsub(pattern = " +", 
+         replacement = " ")      
+  
+  end.time <- Sys.time()
+  time.taken <- end.time - start.time
+  print(paste("Task completed! Ellapsted Time: ",
+              time.taken, sep = " "))
+  
+  return(newText)
+  
+}
+
+```
+
+# Make Ngrams
+
+```{r}
+
+makeNgrams <- function(dataframe, n = 2, threshold = 10){
+  
+  print(paste("Making ", n, "gram...", sep = ""))
+  start.time <- Sys.time()
+  
+  # Build ngram data frame
+  ng <- dataframe %>%
+    unnest_tokens(word, text, token = "ngrams", n = n) %>%
+    table() %>%
+    data.frame()
+  
+  ng$n <- n
+  
+  names(ng) <- c("ngram", "freq", "n")
+  
+  ng <- ng %>% 
+    filter(freq > threshold) %>%
+    .[order(.$freq, decreasing = TRUE), ]
+  
+  ng$ngram <- as.character(ng$ngram)
+  
+  #ng <- ng[order(ng$freq, decreasing = TRUE), ]
+  
+  end.time <- Sys.time()
+  time.taken <- end.time - start.time
+  print(paste("Task completed! Ellapsted Time: ", 
+              time.taken, sep = " "))
+  
+  return(ng)
+  
+}
+
+```
+
+# bakeFiles
+
+```{r}
+
+bakeFiles <- function(df, ngrams.chain = 2, file.name){
+  
+  predFile <- data.frame()
+  
+  for(i in 2:ngrams.chain){
+    
+    ng <- df %>% 
+      makeNgrams(i, threshold = 5)
+    
+    predFile <- bind_rows(predFile, ng)
+    
+    rm(ng)
+    gc()
+    
+  }
+  
+  print(paste("Saving File: ", file.name, sep = ""))
+  start.time <- Sys.time()
+  
+  saveRDS(predFile, file.name)
+  
+  end.time <- Sys.time()
+  time.taken <- end.time - start.time
+  print(paste("File Saved! Ellapsted Time: ", 
+              time.taken, sep = " "))
+  
+}
+
+
+```
+
+
+# Make file
+
+
+```{r}
+
+makeFile <- function(df, ngrams.chain = 2, file.name){
+  
+  predFile <- data.frame()
+  words <- c()
+  
+  for(i in 1:ngrams.chain){
+    
+    words <- c(words ,paste("w", i, sep = ""))
+    
+  }
+
+  for(i in 2:ngrams.chain){
+    
+    ng <- df %>% 
+      filter(n == i) %>%
+      separate(ngram, sep = " ", into = words)
+    
+    predFile <- bind_rows(predFile, ng)
+    
+    rm(ng)
+    gc()
+    
+  }
+  
+  print(paste("Saving File: ", file.name, sep = ""))
+  start.time <- Sys.time()
+  
+  saveRDS(predFile, file.name)
+  
+  end.time <- Sys.time()
+  time.taken <- end.time - start.time
+  print(paste("File Saved! Ellapsted Time: ", 
+              time.taken, sep = " "))
+  
+}
+
+```
+
+# Merge Files
+
+
+```{r}
+
+mergeFiles <- function(file.source, number.files){
+  
+  total.file <- data.frame()
+  
+  for(i in 0:(number.files-1)){
+    
+    new.name <- paste("./", file.source, i, ".rds", sep = "")
+    
+    new.file <- readRDS(new.name)
+    
+    total.file <- bind_rows(total.file, new.file)
+    
+  }
+  
+  merged.file <- total.file %>% 
+    group_by(n, ngram) %>% 
+    summarise(freq = sum(freq)) %>%
+    data.frame() %>%
+    .[order(.$freq, decreasing = TRUE), ]
+  
+  rm(total.file)
+  gc(verbose = FALSE)
+  
+  return(merged.file)
+  
+}
+
+```
+
+# Process Read Files
+
+```{r}
+
+processData <- function(file.path, split = 2, fileSource){
+  
+  # Read file
+  
+  textData <- readFile(file.path)
+  l <- round(length(textData$text))
+  stp <- round(l/split)
+  
+  
+  # Split data
+  
+  for(i in 0:(split - 1)){
+    
+    txtSplit <- data.frame()
+    
+    
+    if(i == (split - 1))
+    {
+      
+      txtSplit <- data.frame(text = textData$text[(1 + i*stp):l])
+      #s <- paste(c("i:", (1 + i*(round(l/5))), "f:", l), sep = " ")     
+      
+    }
+    
+    else{
+      
+      txtSplit <- data.frame(text = textData$text[(1 + i*stp):((i + 1)*stp)])
+      #s <- paste(c("i:", (1 + i*(round(l/5))), "f:", (i + 1)*round(l/5)), sep = " ")
+
+    }
+    
+    # Clean data
+    
+    txtSplit$text <- cleanText(txtSplit$text)
+    
+    # Make File     
+    
+    fileName <- paste("./", fileSource, i,".rds", sep = "")
+    
+    n.chain = 5
+    
+    bakeFiles(txtSplit, ngrams.chain = n.chain, file.name = fileName)
+    
+    rm(txtSplit)
+    gc()
+    
+  }
+  
+  
+  data <- mergeFiles(file.source = fileSource, number.files = split)
+  return(data)
+  
+}
+
+```
+
+# Test
+
+```{r}
+
+#blog <- processData(blogFile, split = 10, fileSource = "Blog")
+#news <- processData(newsFile, split = 10, fileSource = "News")
+#twitter <- processData(twitterFile, split = 10, fileSource = "Twitter")
+
+
+blog <- mergeFiles("Blog", 10) 
+news <- mergeFiles("News", 10)
+twitter <- mergeFiles("Twitter", 10)
+
+
+totalData <- bind_rows(blog, news, twitter) %>%
+  group_by(n, ngram) %>%
+  summarise(freq = sum(freq)) %>%
+  data.frame() %>%
+  .[order(.$freq, decreasing = TRUE), ]
+
+totalData <- totalData[, c("ngram", "n", "freq")]
+
+makeFile(totalData, ngrams.chain = 5, "./predFile.rds")
+
+```
+

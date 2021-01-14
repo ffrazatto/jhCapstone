@@ -1,0 +1,240 @@
+---
+title: "Milestone Project"
+author: "Felipe Frazatto"
+date: "9/29/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, 
+                      message = FALSE,
+                      warning=FALSE)
+```
+
+
+# Data Loading
+
+Load all relevant libraries.
+
+
+```{r message=FALSE}
+
+library(dplyr)
+library(tm)
+library(tidytext)
+library(ngram)
+library(tidyr)
+
+```
+
+
+Since the data files are too large they are not present in this github project 
+repository, but, as reproducibility is extremely important, the data can be 
+acquired with this 
+[link](https://d396qusza40orc.cloudfront.net/dsscapstone/dataset/Coursera-SwiftKey.zip).
+
+Before loading the data into R, first lets explore each file sizes.
+
+```{r}
+
+# Files Paths
+blogFile <- "../Data/en_US/en_US.blogs.txt"
+newsFile <- "../Data/en_US/en_US.news.txt"
+twitterFile <- "../Data/en_US/en_US.twitter.txt"
+
+```
+
+Load `r f*100 `% of the total data.
+
+```{r cache=TRUE}
+
+f = 0.1
+
+# Read the files, note the factor f1 multiplying the number of lines to be read
+blogData <- readLines(blogFile,
+                      encoding = "UTF-8",
+                      skipNul = TRUE)
+
+newsData <- readLines(newsFile, 
+                      encoding = "UTF-8", 
+                      skipNul = TRUE)
+
+twitterData <- readLines(twitterFile,
+                         encoding = "UTF-8",
+                         skipNul = TRUE)
+
+# Concatenate results
+totalData <- c(blogData, newsData, twitterData)
+
+# Sample random text
+totalData <- sample(totalData, length(totalData)*f)
+
+# Make data frame
+#finalSummary <- data.frame(total.Size = format(object.size(totalData), 
+#                                               units = "MB"),
+#                           total.Lines = length(totalData),
+#                           total.Words = wordcount(totalData))
+
+        
+# Free RAM
+#rm(fName, fSize, nLines, nWords)
+rm(blogData, newsData, twitterData)
+gc(verbose = FALSE)
+
+```
+
+
+# Data Processing
+
+## Cleaning
+
+The cleaning processes will occur in the following order:
+
+1- Convert all text to lowercase;
+2- Substitute punctuation with blank spaces;
+3- Remove non alphanumeric characters;
+4- Substitute any number with blank spaces;
+5- Remove words with the same letter repeted more than 3 times;
+6- Reduce multiple spaces to only one.
+
+
+When dealing with a unigram, stopwords will be removed. However, since the 
+final product is a prediction app, removing stopwords would result in low 
+accuracy. A list of stopwords can be found 
+[here](https://www.ranks.nl/stopwords));
+
+
+```{r cache=TRUE}
+
+# Declare function for cleaning
+cleanText <- function(text) {
+     
+     newText <- text %>% 
+          tolower() %>% 
+          
+          gsub(pattern = "[^a-zA-Z\\d\\s:]",
+               replacement = " ") %>%
+          
+          gsub(pattern = "[[:punct:]]", 
+               replacement =  " ") %>% 
+          
+          gsub(pattern = "[0-9]", 
+               replacement = " ") %>% 
+          
+          gsub(pattern = "\\b(?=\\w*(\\w){3}\\1)\\w+\\b",
+               replacement = " ", 
+               perl = TRUE) %>%
+          
+          gsub(pattern = " +", 
+               replacement = " ")      
+
+     newText
+     
+}
+
+# Clean data
+totalClear <- data.frame(text = cleanText(totalData))
+
+# Free RAM
+rm(totalData)
+gc(verbose = FALSE)
+
+```
+
+## Tokenrization
+
+Tokenrization separates the text word by word and counts the frequency that each
+one appears, like a histogram. Alternatively, instead of counting individual 
+words, a bigram can be made, which counts the appearance of pair of words. This
+can be extended to trigrams (sequence of three words) or a n-gram (sequence of
+n words). 
+
+This approach is extremely useful when making a word prediction app, since it 
+gives the most likely sequence of words that the user usually writes.
+
+First, lets define some useful functions, so the code can be more concise. 
+
+```{r}
+
+# Define function for ngram making
+makeNgrams <- function(dataframe, n = 2, threshold = 10){
+  
+  # Build ngram data frame
+  ng <- dataframe %>%
+    unnest_tokens(word, text, token = "ngrams", n = n) %>%
+    table() %>%
+    data.frame()
+  
+  ng$n <- n
+  
+  names(ng) <- c("ngram", "freq", "n")
+  
+  ng <- ng %>% 
+    filter(freq > threshold) %>%
+    .[order(.$freq, decreasing = TRUE), ]
+  
+  ng$ngram <- as.character(ng$ngram)
+    
+  #ng <- ng[order(ng$freq, decreasing = TRUE), ]
+  
+  return(ng)
+  
+  rm(ng)
+  gc()
+  
+}
+```
+
+```{r}
+
+makeFile <- function(df, ngrams.chain = 2){
+  
+  predFile <- data.frame()
+  words <- c()
+  
+  for(i in 1:ngrams.chain){
+    
+    words <- c(words ,paste("w", i, sep = ""))
+    
+  }
+  
+  
+  for(i in 2:ngrams.chain){
+    
+    ng <- df %>% 
+      makeNgrams(i) %>% 
+      separate(ngram, sep = " ", into = words)
+    
+    predFile <- bind_rows(predFile, ng)
+    
+    rm(ng)
+    gc()
+    
+  }
+  
+  saveRDS(predFile, "./predFile.rds")
+
+  
+}
+
+
+```
+
+
+
+Now, lets make the ngrams.
+
+```{r cache=TRUE}
+
+makeFile(totalClear, ngrams.chain = 5)
+
+```
+
+
+
+```{r cache=TRUE}
+
+pF <- readRDS("./predFile.rds")
+
+```
+
