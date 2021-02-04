@@ -1,0 +1,10 @@
+name: predict
+title:
+username:
+account: ffrazatto
+server: shinyapps.io
+hostUrl: https://api.shinyapps.io/v1
+appId: 3584942
+bundleId: 4182375
+url: https://ffrazatto.shinyapps.io/predict/
+when: 1612477731.09727

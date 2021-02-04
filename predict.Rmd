@@ -228,7 +228,7 @@ pred("There is a house")
 
 ```{r}
 
-pred("There is a house in New")
+pred("There is a house in New")[1]
 
 ```
 
