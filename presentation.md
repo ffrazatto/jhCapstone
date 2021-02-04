@@ -51,7 +51,9 @@ Results
 - App size: 2.7 MB
 
 
-App available at: 
+App available at: [shinyapps.io](http://ffrazatto.shinyapps.io/predict)
+
+
 
 
 
