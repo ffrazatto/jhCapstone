@@ -1,4 +1,4 @@
-Coursera/Jhon Hopkins Capstone Project
+Coursera/John Hopkins Capstone Project
 ========================================================
 author: Felipe Frazatto
 date: 02/03/21
